@@ -2,6 +2,8 @@
 
 Experiments 1–2 cover the last_pair and full groupings; the all-groupings run repeats them with all four groupings; Experiment 3 uses a second workload where partial fusion can win. How to rerun everything: see the [top-level README](../README.md#reproduce).
 
+**Naming:** "Experiment 3" in this file is the sin/tanh fan-out screen (`exp3_fanout_screen/`). Bhargav's exp3–exp14 (W1–W6) are a separate series in [bhargav/README.md](bhargav/README.md); his exp3 is W2 linear + GELU.
+
 Workload W1: `torch.relu(x + bias) + residual`, FP32, contiguous, inference only, seed 0. `x` and `residual` are `[M, N]`; `bias` is `[N]`.
 
 ## Candidate names
@@ -155,7 +157,7 @@ Replay mode copies every input into its own buffers on every call; see `src/gree
 - full_replay: 7 vs 3 tensor passes, predicted ≈ 830 µs, measured 840 µs at 4096².
 - last_pair_replay: 9 vs 5 tensor passes, predicted ≈ 1066 µs, measured 1079 µs at 4096².
 
-**Do not read "replay is slower at large shapes" as a finding.** Ordinary-vs-ordinary and ordinary-vs-eager comparisons are unaffected. The team needs to decide whether to measure replay without the copy and report the refresh cost separately, which is what the project spec asks for.
+**Do not read "replay is slower at large shapes" as a finding.** Bhargav later added `replay_input_refresh: on_change` (copy only new or modified inputs) and used it for his exp7–14; the default is still `always`, and every run in this file used `always`. Ordinary-vs-ordinary and ordinary-vs-eager comparisons are unaffected. The team needs to decide whether to measure replay without the copy and report the refresh cost separately, which is what the project spec asks for.
 
 ## Rerunning
 
@@ -163,7 +165,7 @@ Steps are in the [top-level README](../README.md#reproduce). On Great Lakes, loa
 
 Version note: the team guide pins torch 2.10.0+cu128 and this run used 2.15.0+cu132. Use the same version before pooling numbers with the other pair. Planner cache keys include the torch version, so cached decisions from the two versions will not match.
 
-## Experiment 3: shared expensive intermediate (fan-out), partial fusion wins
+## Experiment 3 (sin/tanh fan-out screen): partial fusion wins
 
 Script: `scripts/exp3_screen_fanout.py` (Slurm: `scripts/slurm/exp3_fanout_screen.sbatch`). Folder: `exp3_fanout_screen/`.
 

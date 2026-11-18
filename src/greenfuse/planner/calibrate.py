@@ -56,10 +56,12 @@ class ExperimentContext:
             raise ValueError("Candidate is absent from this experiment")
         return prepare_execution(build_partition(self.captured, candidate.partition), self.ensure_inputs(),
                                  mode=candidate.mode, reference=self.workload,
-                                 config=CompilerConfig(str(Path(path) / "compiler") if self.config.compiler_artifacts else None),
+                                 config=CompilerConfig(str(Path(path) / "compiler") if self.config.compiler_artifacts else None,
+                                                       gemm_backend=self.config.gemm_backend),
                                  allow_cpu=self.config.device == "cpu", warmup_iterations=self.config.warmup_iterations,
                                  rtol=self.config.rtol, atol=self.config.atol,
-                                 trace_path=Path(path) / "kernels.json" if profile else None)
+                                 trace_path=Path(path) / "kernels.json" if profile else None,
+                                 input_refresh=self.config.replay_input_refresh)
 
     def measurement_candidates(self):
         candidates = [MeasurementCandidate(c.id, lambda path, name=c.id: self.prepare_candidate(name, path),
@@ -73,7 +75,7 @@ class ExperimentContext:
 
 def create_context(config, shape, *, exclusive_gpu=False):
     config = config.for_shape(shape)
-    workload = get_workload(config.workload)
+    workload = get_workload(config.workload, n=shape[1])
     spec = replace(get_workload_spec(config.workload, m=shape[0], n=shape[1], seed=config.seed),
                    rtol=config.rtol, atol=config.atol)
     captured = capture_graph(workload)

@@ -2,7 +2,17 @@
 
 GreenFuse tests whether different ways of grouping GPU operations for compilation (TorchInductor), with or without CUDA Graph replay, reduce GPU energy while staying within 5% of the fastest runtime. The Python package and command are named `greenfuse`.
 
-Results, numbers, and findings are in **[results/README.md](results/README.md)**. What was done in each version, and why, is in **[PROJECT_VERSION_LOG.md](PROJECT_VERSION_LOG.md)**.
+- **Results:** [results/README.md](results/README.md) (W1 + sin/tanh fan-out screen) and [results/bhargav/README.md](results/bhargav/README.md) (W1–W6, exp3–exp14).
+- **History:** what was done in each version, and why, is in [PROJECT_VERSION_LOG.md](PROJECT_VERSION_LOG.md).
+
+| Workload | Calculation |
+|---|---|
+| `w1` | `relu(x + bias) + residual` |
+| `w2` | `gelu(x @ weight + bias)` |
+| `w3` | `gelu(layer_norm(x + residual))` |
+| `w4` | `h = x + bias; h - h.mean(-1, keepdim=True)` |
+| `w5` | `softmax(gelu(x + bias), -1)` |
+| `w6` | `gelu(layer_norm(x + residual) @ weight + bias)` |
 
 ## Repository structure
 
@@ -10,21 +20,24 @@ Results, numbers, and findings are in **[results/README.md](results/README.md)**
 efficientfuse/
 ├── src/greenfuse/          the package
 │   ├── cli.py              MAIN ENTRY POINT: the `greenfuse` command (inspect, calibrate, run, benchmark, select, report)
-│   ├── workloads/          workload W1: relu(x + bias) + residual
+│   ├── workloads/          workloads W1–W6
 │   ├── graph/, partition/  capture the op graph and enumerate groupings (p00 full, p01, p10, p11 separate)
 │   ├── compiler/           compile each group with TorchInductor, read kernel evidence
 │   ├── execution/          ordinary launch and CUDA Graph replay executors
 │   ├── measurement/        runtime and NVML GPU energy measurement
-│   └── planner/            select within the 5% runtime bound, validate, cache decisions
-├── configs/                experiment configs (YAML)
+│   ├── planner/            select within the 5% runtime bound, validate, cache decisions
+│   └── naming.py           readable grouping names (full, first_pair, last_pair, separate)
+├── configs/                experiment configs (YAML), one per experiment
 ├── scripts/
 │   ├── check_environment.py, check_execution.py   setup checks
 │   ├── export_experiment.py                       planner run -> readable summary.csv + plot
-│   ├── exp3_screen_fanout.py                      Experiment 3 (standalone)
-│   ├── exp3_inspect_kernels.py, exp3_trace_report.py   Experiment 3 kernel analysis
-│   └── slurm/exp3_fanout_screen.sbatch            Slurm job for Experiment 3
+│   ├── compare_workloads.py, threshold_sensitivity.py   cross-experiment tables (Bhargav)
+│   ├── screen_candidates.py, profile_kernels.py, quick_energy.py   manual GPU tools (Bhargav)
+│   ├── exp3_screen_fanout.py                      sin/tanh fan-out screen (standalone)
+│   ├── exp3_inspect_kernels.py, exp3_trace_report.py   fan-out screen kernel analysis
+│   └── slurm/                                     Slurm jobs
 ├── tests/                  unit, integration, and GPU tests
-├── results/                all measured results (see results/README.md)
+├── results/                all measured results
 ├── docs/SETUP.md           detailed setup and command reference
 └── PROJECT_VERSION_LOG.md  history: what changed in each version, findings, mistakes, reasons
 ```
@@ -42,6 +55,8 @@ pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cu132
 pip install -e ".[config,measurement,analysis,test]"
 export CC=$(which gcc) CXX=$(which g++)
 ```
+
+Bhargav's W1–W6 runs used PyTorch 2.10.0+cu128 with a venv instead; see [results/bhargav/README.md](results/bhargav/README.md#reproduce).
 
 **2. Check the setup** (optional)
 
@@ -63,7 +78,9 @@ python scripts/export_experiment.py results/runs/all_groupings/<run>/w1_4096x409
 
 Experiments 1 and 2 alone: use `configs/exp1_w1_small_last_pair_full.yaml` or `configs/exp2_w1_large_last_pair_full.yaml` in the same command.
 
-**4. Experiment 3: fan-out workload, where partial fusion can win**
+**4. Any other experiment (W1–W6, exp3–exp14):** same `greenfuse calibrate` command with `configs/expN_*.yaml`.
+
+**5. Sin/tanh fan-out screen** (where partial fusion wins; not the same as `configs/exp3_*`)
 
 ```bash
 sbatch scripts/slurm/exp3_fanout_screen.sbatch     # set your own --account first, or run its python command directly

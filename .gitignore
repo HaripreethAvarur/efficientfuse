@@ -30,6 +30,7 @@ results/*
 !results/exp2_w1_large_shapes/
 !results/all_groupings_w1_all_shapes/
 !results/exp3_fanout_screen/
+!results/bhargav/
 outputs/
 tmp/
 slurm-*.out

@@ -10,28 +10,34 @@ import json
 from pathlib import Path
 import shutil
 
+from greenfuse.naming import GROUPING_NAMES, grouping_name
+from greenfuse.partition.enumerate import PartitionSpec
 from greenfuse.results import load_report, summarize_candidate
 
-GROUPINGS = {
-    "p11": ("separate", "[bias add] [ReLU] [residual add]"),
-    "p01": ("first_pair", "[bias add + ReLU] [residual add]"),
-    "p10": ("last_pair", "[bias add] [ReLU + residual add]"),
-    "p00": ("full", "[bias add + ReLU + residual add]"),
-}
+_KINDS = None  # operation kinds of the exported workload; set by export() for chains longer than 3
 MODES = {"launch": "ordinary", "graph": "replay"}
 # Default validated categorical slots 1 and 2; marker shape is the second cue for mode.
-COLORS = {"full": "#2a78d6", "last_pair": "#eb6834", "first_pair": "#1baf7a", "separate": "#6250d6", "eager": "#52514e"}
+COLORS = {"full": "#2a78d6", "last_pair": "#eb6834", "first_pair": "#1baf7a", "separate": "#6250d6", "eager": "#52514e",
+          "mixed": "#a8a7a2"}  # mixed = any other grouping of a longer chain
 
 
 def readable(candidate_id):
     if candidate_id == "eager_launch":
         return "eager_baseline"
     partition, mode = candidate_id.rsplit("_", 1)
-    return f"compiled_{GROUPINGS[partition][0]}_{MODES[mode]}"
+    if partition in GROUPING_NAMES:
+        return f"compiled_{GROUPING_NAMES[partition]}_{MODES[mode]}"
+    cuts = tuple(int(bit) for bit in partition[1:])
+    return f"compiled_{grouping_name(PartitionSpec('', cuts, ()), _KINDS)}_{MODES[mode]}"
 
 
 def grouping_of(candidate_id):
-    return "eager" if candidate_id == "eager_launch" else GROUPINGS[candidate_id.rsplit("_", 1)[0]][0]
+    if candidate_id == "eager_launch":
+        return "eager"
+    partition = candidate_id.rsplit("_", 1)[0]
+    if partition in GROUPING_NAMES:
+        return GROUPING_NAMES[partition]
+    return "full" if set(partition[1:]) == {"0"} else "separate" if set(partition[1:]) == {"1"} else "mixed"
 
 
 def summaries(report):
@@ -64,13 +70,14 @@ def write_rows(run_dir, decision, shape):
     return rows
 
 
-def plot(run_dir, decision, shape, path):
+def plot(run_dir, decision, shape, path, label="W1"):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     report = load_report(run_dir / "initial.json")
     stats = summaries(report)
+    mixed_labeled = False
     figure, axis = plt.subplots(figsize=(9, 5.5), layout="constrained")
     for cid, summary in stats.items():
         time, energy = summary["timing"], summary["energy"]
@@ -79,12 +86,16 @@ def plot(run_dir, decision, shape, path):
         x, y = time["median"] * 1e6, energy["median"] * 1e3
         group, replay = grouping_of(cid), cid.endswith("_graph")
         color = COLORS[group]
+        selected = cid == decision.get("selected_id")
+        label = readable(cid) if group != "mixed" or selected else None
+        if group == "mixed" and not selected and not mixed_labeled:
+            label, mixed_labeled = "mixed groupings", True
         axis.errorbar(x, y, xerr=[[x - time["minimum"] * 1e6], [time["maximum"] * 1e6 - x]],
                       yerr=[[y - energy["minimum"] * 1e3], [energy["maximum"] * 1e3 - y]],
                       fmt="s" if group == "eager" else ("D" if replay else "o"), markersize=8,
                       color=color, mfc="white" if replay else color, mew=2, elinewidth=1, capsize=3,
-                      label=readable(cid))
-        if cid == decision.get("selected_id"):
+                      label=label)
+        if selected:
             axis.scatter([x], [y], s=380, facecolors="none", edgecolors="#0b0b0b", linewidths=1.5, zorder=5)
             axis.annotate("selected", (x, y), xytext=(10, 10), textcoords="offset points", color="#0b0b0b", fontsize=9)
     selection = decision.get("selection") or {}
@@ -98,15 +109,23 @@ def plot(run_dir, decision, shape, path):
         axis.spines[side].set_visible(False)
     axis.set_xlabel("Synchronized wall-clock runtime per call (µs)")
     axis.set_ylabel("GPU-device energy per call (mJ)")
-    axis.set_title(f"W1 {shape}: runtime vs GPU energy (initial search, median and observed range)", fontsize=11)
+    axis.set_title(f"{label} {shape}: runtime vs GPU energy (initial search, median and observed range)", fontsize=11)
     axis.legend(fontsize=8, frameon=False)
     figure.savefig(path, dpi=160)
     plt.close(figure)
 
 
-def export(run_dir, dest, shape):
+def export(run_dir, dest, shape, label="W1"):
+    global _KINDS
     run_dir, dest = Path(run_dir), Path(dest)
     decision = json.loads((run_dir / "decision.json").read_text())
+    metadata = json.loads((run_dir / "initial.json").read_text())["metadata"]
+    workload = metadata["workload"]
+    if len(metadata["partitions"][0]["cuts"]) != 2:  # longer chains: name groups by their operations
+        from greenfuse.graph.capture import capture_graph
+        from greenfuse.workloads.registry import get_workload
+        n = workload["inputs"][0]["shape"][-1]
+        _KINDS = [op.kind for op in capture_graph(get_workload(workload["name"], n=n)).description.operations]
     dest.mkdir(parents=True, exist_ok=True)
     raw = dest / "raw"
     if raw.exists():
@@ -118,7 +137,7 @@ def export(run_dir, dest, shape):
         writer.writeheader()
         writer.writerows(rows)
     if (run_dir / "initial.json").exists():
-        plot(run_dir, decision, shape, dest / "runtime_vs_energy.png")
+        plot(run_dir, decision, shape, dest / "runtime_vs_energy.png", label)
     return decision, rows
 
 
@@ -127,8 +146,9 @@ def main():
     parser.add_argument("run_dir", type=Path, help="Folder holding initial.json, validation.json, decision.json")
     parser.add_argument("dest", type=Path)
     parser.add_argument("--shape", required=True, help="Label such as 4096x4096")
+    parser.add_argument("--label", default="W1", help="Plot title prefix, e.g. 'W2 linear+GELU (cuBLAS)'")
     args = parser.parse_args()
-    decision, _ = export(args.run_dir, args.dest, args.shape)
+    decision, _ = export(args.run_dir, args.dest, args.shape, args.label)
     print(f"{args.shape}: {decision['status']} -> {readable(decision['selected_id']) if decision.get('selected_id') else 'none'} | {args.dest}")
 
 

@@ -12,7 +12,9 @@ Results and plots are in [results/README.md](results/README.md). The steps to re
 | [v1](#v1--first-gpu-runs-experiments-1-and-2-hari) | 2026-10-29 | Haripreeth Avarur | `5c3407b` | First real GPU runs on an A40. Fixed two bugs that blocked GPU selection. Experiment 1 (small shape) and Experiment 2 (large shapes) for the last_pair and full groupings. |
 | [v2](#v2--all-four-groupings-at-all-shapes-hari) | 2026-10-29 | Haripreeth Avarur | `e8fe82b` | All four groupings × both execution modes × four shapes, in one run. All four shapes validated. |
 | [v3](#v3--experiment-3-fan-out-workload-where-partial-fusion-wins-hari) | 2026-10-30 | Haripreeth Avarur | `e8fe82b` | Experiment 3: a second workload where splitting the computation beats full fusion by up to 34% in time and 30% in energy. |
-| [v4](#v4--repository-cleanup-and-publishing-hari) | 2026-11-18 | Haripreeth Avarur | `e8fe82b` and this commit | Repo cleaned and published to GitHub, plus a short README with rerun steps and this log. |
+| [v4](#v4--repository-cleanup-and-publishing-hari) | 2026-11-18 | Haripreeth Avarur | `e8fe82b`, `06885e7`, `7144860` | Repo cleaned and published to GitHub, plus a short README with rerun steps and this log. |
+| [v5](#v5--workloads-w2w6-and-exp3exp14-bhargav) | 2026-10-29 → 11-18 | Bhargav Keralapur Srinidhi | `340602f` … `bb96c30`, `ac5a7d8` (PR #1), `479875a` | Workloads W2–W6, fan-out support in the graph code, GEMM and replay-input policies, and 12 experiments (exp3–exp14). Partial grouping wins only when full fusion forces a slower Triton GEMM. |
+| [v6](#v6--merging-bhargavs-work-into-haris-branch-hari) | 2026-11-18 | Haripreeth Avarur | this merge | Brought Shreya's latest `main` (with Bhargav's v5) into Hari's fork, kept Hari's file structure and docs, and prepared a pull request back to Shreya's repo. |
 
 ## Terms used throughout
 
@@ -146,7 +148,7 @@ A 363-line README (now in [docs/SETUP.md](docs/SETUP.md)). It covers installatio
 
 ## v1 — First GPU runs: Experiments 1 and 2 (Hari)
 
-**Date:** 2026-10-29 (runs between 21:05 and 21:53). **Author:** Haripreeth Avarur. **Commit:** `5c3407b`.
+**Date:** 2026-10-29 (runs between 21:05 and 21:53). **Author:** Haripreeth Avarur. **Commit:** `5c3407b`. The same content also exists in Shreya's repo as `e17577c`, the original version of this commit, which reached her `main` through Bhargav's PR #1.
 
 ### Goal
 
@@ -460,15 +462,92 @@ This is a screen, so the results are not yet planner-validated. Before claiming 
 
 ---
 
-## Open issues (as of v4)
+## v5 — Workloads W2–W6 and exp3–exp14 (Bhargav)
+
+**Dates:** 2026-10-29 to 2026-11-18. **Author:** Bhargav Keralapur Srinidhi. **Commits:** `340602f`, `a213511`, `12817cb`, `3f75afe`, `95125ce`, `7f0b37d`, `bb96c30`, merged into Shreya's `main` as PR #1 (`ac5a7d8`), then cleaned up in `479875a`. Full details, tables, and rerun steps are in [results/bhargav/README.md](results/bhargav/README.md). This entry is a summary.
+
+### Why
+
+v2 showed that for W1, a pure elementwise chain, full fusion always wins. To test whether partial grouping can ever win, Bhargav added workloads where full fusion might have a real cost:
+
+| Workload | Calculation | Why full fusion might lose |
+|---|---|---|
+| W2 | `gelu(x @ weight + bias)` | Fusing the epilogue into the GEMM needs a Triton GEMM instead of cuBLAS |
+| W3 | `gelu(layer_norm(x + residual))` | Fusing pointwise work into a reduction changes how the work is split |
+| W4 | `h = x + bias; h - h.mean(-1, keepdim=True)` | `h` feeds two operations (fan-out), so full fusion may reload or recompute it |
+| W5 | `softmax(gelu(x + bias), -1)` | A multi-pass reduction may recompute the pointwise work |
+| W6 | `gelu(layer_norm(x + residual) @ weight + bias)` | Five operations, so 16 groupings × 2 modes = 32 candidates |
+
+### What changed in the code
+
+- **New operations:** matmul, GELU, LayerNorm, mean, subtract, and softmax. W3 is built per row width, because LayerNorm needs a fixed shape.
+- **Fan-out support:** an operation may reuse earlier results, and groups can pass several values onward (`GroupBindings.output_ids`). This lifts the "straight chain only" limit from v0.
+- **`gemm_backend` config key:** `default`, `autotune`, `triton`, or `fuse_epilogue` (a group that fuses a matmul with other operations uses a Triton GEMM; a matmul-only group keeps cuBLAS).
+- **`replay_input_refresh` config key:** `always` (the default; same as v0, copies every input on every replay) or `on_change` (copies only new or modified inputs). **This addresses the replay-copies mistake found in v1.**
+- **TF32 settings** are recorded in the environment report and planner identity.
+- **Profiler fix for PyTorch 2.10:** after CUDA Graphs are used, later profiler sessions drop GPU kernel records. Calibration now checks the execution mode from CPU-side launch records, and authoritative kernel counts come from fresh-process checks.
+- **`--partitions`** also accepts names (`full`, `first_pair`, `last_pair`, `separate`), and grouping names now live in one module, `src/greenfuse/naming.py`.
+- **New scripts:** `compare_workloads.py`, `threshold_sensitivity.py`, `screen_candidates.py`, `profile_kernels.py`, `quick_energy.py`, and `scripts/slurm/overnight_bhargav.sh`. `export_experiment.py` gained a `--label` option.
+- **Software:** PyTorch 2.10.0+cu128, Triton 3.6.0, Python 3.12.1 (the version in the team guide). Hari's v1–v3 runs used 2.15.0+cu132, so absolute numbers must not be pooled across the two sets. For example, eager W1 at 32×256 measured 53 µs in Bhargav's runs and 86 µs in Hari's, on the same GPU model.
+
+### Results
+
+**Part 1, exp3–exp6 at 4096×4096:**
+- W3 (LayerNorm) and W4 (fan-out): **full fusion validated**. Compared with the best partial grouping, it is 35% and 47% faster, respectively. The suspected costs did not appear: for W4, Inductor keeps each 4096-wide row on chip, so there is no reload or recompute.
+- W2 (linear + GELU): both runs inconclusive. A cuBLAS GEMM with a separate bias/GELU kernel was 8% faster and used 11% less energy than one fused Triton GEMM. Inductor's autotuner already prefers cuBLAS by default.
+
+**Part 2, exp7–exp14** (small and decode shapes, replay with `on_change`):
+- **With the default compiler policy,** partial grouping + replay never saved energy compared with full + replay.
+- **With `fuse_epilogue`,** partial + replay was 13–18% faster and used 12–18% less energy at W2 64 and 128 rows and W6 64 and 512 rows. Only W2 128×4096 has a validated planner decision; the other three were inconclusive.
+- **The cause:** the fused Triton GEMM is slower than cuBLAS (for example, 264.0 vs 227.0 µs at W2 128 rows).
+- **Threshold sensitivity:** recomputing the selection at 1.10× and 1.20× changed no selected candidate in the 14 exported runs.
+
+### How this relates to Hari's fan-out screen (v3)
+
+This is Hari's reading of the two result sets side by side:
+- **Bhargav's W4** has 4096-wide rows. The reduction keeps a whole row on chip, so full fusion has no cost and wins.
+- **Hari's sin/tanh screen** has rows of 8,192 and 32,768. These are too long to keep on chip, so Inductor walks each row twice and recomputes the shared value, and the split wins for 12 ≤ k ≤ 24.
+
+Together they suggest that **fan-out makes full fusion lose only when the row no longer fits on chip *and* the shared value is expensive to recompute.**
+
+**Naming clash:** Bhargav's "exp3" is W2 linear + GELU (`configs/exp3_w2_linear_gelu_cublas.yaml`). It is not Hari's "Experiment 3" sin/tanh screen (`results/exp3_fanout_screen/`).
+
+---
+
+## v6 — Merging Bhargav's work into Hari's branch (Hari)
+
+**Date:** 2026-11-18. **Author:** Haripreeth Avarur. **Commit:** this merge commit and its follow-up.
+
+### Why
+
+Hari's fork was 4 commits ahead of Shreya's `main` and 10 behind it. Those 10 were Bhargav's v5 work, plus the original version of Hari's Experiments 1–2 commit (`e17577c`). The goal was to bring everything into one branch without losing Hari's file structure and docs, then open a pull request back to Shreya's repo.
+
+### How conflicts were resolved
+
+- **Merge, not rebase.** Nothing already pushed to the fork was rewritten.
+- **`scripts/check_execution.py`, `scripts/measure_workload.py`, `scripts/export_experiment.py`, `src/greenfuse/config.py`: Bhargav's versions.** They build directly on the same Experiments 1–2 code (`5c3407b` and `e17577c` have identical code), adding `--workload`, partition names, and the new config keys.
+- **`results/README.md`: Hari's version**, which Bhargav had not changed. It now has a naming note and points out that `replay_input_refresh: on_change` exists.
+- **`README.md`: Hari's short version,** now with the W1–W6 table, Bhargav's scripts in the structure tree, and a link to his results.
+- **`docs/SETUP.md`:** replaced with Bhargav's updated long guide, which has the W1–W6 status, new config keys, and Great Lakes Python-header notes.
+- **`.gitignore`:** `results/bhargav/` added to the list of published result folders.
+
+### Note on history
+
+- **Shreya's `main` was rewritten while this merge was in progress.** All 10 new commits got new hashes, the Claude co-author lines were removed from every commit, and 3 lines of `scripts/slurm/overnight_bhargav.sh` changed. The merge was redone on top of the rewritten history, so the fork has no co-author lines from upstream.
+- **The old Experiments 1–2 commit is in both histories.** Shreya's `main` contains `e17577c`, the original version of Hari's Experiments 1–2 commit, authored as `havarur@umich.edu`. Hari's fork also has its copy `5c3407b` (`Hari.avarur@gmail.com`). The code in both is identical, so the merge has both in its history.
+
+---
+
+## Open issues (as of v6)
 
 | # | Issue | Since | Notes |
 |---|---|---|---|
-| 1 | Replay timings include per-call input copies (4 extra tensor passes for W1) | v1 | Team decision needed: measure replay without the copy and report the refresh cost separately, as the spec asks. |
-| 2 | Torch version differs from the team guide (2.15.0+cu132 vs 2.10.0+cu128) | v1 | Align before pooling numbers across machines. |
-| 3 | Small-shape decisions are fragile (candidates within ~1–3%) | v1, v2 | Longer windows or more rounds may stabilize them. |
-| 4 | Experiment 3 is a screen, not planner-validated | v3 | Extend `graph/validate.py` for fan-out and reductions, then rerun through `greenfuse calibrate`. |
-| 5 | No script for the cross-shape summary CSV and plot | v2 | Add one to `scripts/`. |
+| 1 | Replay timings include per-call input copies (4 extra tensor passes for W1) | v1 | Partly addressed in v5 by `replay_input_refresh: on_change`. The default is still `always`, and all of Hari's runs and Bhargav's exp3–exp6 used it. The team still needs to decide which policy to report. |
+| 2 | Two PyTorch versions in use (Hari 2.15.0+cu132; Bhargav and the team guide 2.10.0+cu128) | v1, v5 | Don't pool absolute numbers. Rerun on one version before the final report. |
+| 3 | Small-shape decisions are fragile (candidates within ~1–3%) | v1, v2, v5 | Several small-shape runs in v5 were also inconclusive. |
+| 4 | The sin/tanh fan-out screen is not planner-validated | v3 | v5 added fan-out support to the graph code, so the remaining work is adding sin, tanh, and sum operations and a workload entry, then running it through `greenfuse calibrate`. |
+| 5 | No script for the cross-shape summary CSV and plot of v2 | v2 | v5's `compare_workloads.py` may be adaptable. |
+| 6 | Experiment names clash ("Experiment 3" vs Bhargav's exp3) | v5 | Consider renaming the sin/tanh screen to its own label (for example, exp15). |
 
 ---
 
