@@ -23,11 +23,15 @@ def environment_report(device_name="cuda:0", *, exclusive_gpu=False):
     try:
         import torch
         device = torch.device(device_name)
+        # Match the compiler record; PyPI wheels omit the local tag (e.g. +cu132) from package metadata.
+        report["versions"]["torch"] = str(torch.__version__)
         report.update(cuda_build=torch.version.cuda, cuda_available=torch.cuda.is_available(),
                       torch_threads=torch.get_num_threads(), float32_matmul_precision=torch.get_float32_matmul_precision(),
                       deterministic_algorithms=torch.are_deterministic_algorithms_enabled(),
                       cudnn_benchmark=torch.backends.cudnn.benchmark,
-                      cudnn_deterministic=torch.backends.cudnn.deterministic)
+                      cudnn_deterministic=torch.backends.cudnn.deterministic,
+                      cuda_matmul_allow_tf32=torch.backends.cuda.matmul.allow_tf32,
+                      cudnn_allow_tf32=torch.backends.cudnn.allow_tf32)
         if device.type == "cpu":
             report.update(status="cpu_development", reason="CPU timing only; no GPU energy or GPU performance claims")
             return report
