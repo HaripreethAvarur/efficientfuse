@@ -2,7 +2,7 @@
 
 GreenFuse tests whether different ways of grouping GPU operations for compilation (TorchInductor), with or without CUDA Graph replay, reduce GPU energy while staying within 5% of the fastest runtime. The Python package and command are named `greenfuse`.
 
-Results, numbers, and findings are in **[results/README.md](results/README.md)**.
+Results, numbers, and findings are in **[results/README.md](results/README.md)**. What was done in each version, and why, is in **[PROJECT_VERSION_LOG.md](PROJECT_VERSION_LOG.md)**.
 
 ## Repository structure
 
@@ -25,7 +25,8 @@ efficientfuse/
 │   └── slurm/exp3_fanout_screen.sbatch            Slurm job for Experiment 3
 ├── tests/                  unit, integration, and GPU tests
 ├── results/                all measured results (see results/README.md)
-└── docs/SETUP.md           detailed setup and command reference
+├── docs/SETUP.md           detailed setup and command reference
+└── PROJECT_VERSION_LOG.md  history: what changed in each version, findings, mistakes, reasons
 ```
 
 ## Reproduce
