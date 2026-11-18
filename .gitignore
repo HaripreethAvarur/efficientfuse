@@ -47,3 +47,6 @@ credentials*
 *.key
 .DS_Store
 
+
+# Local GitHub token (never commit)
+github_token.txt
