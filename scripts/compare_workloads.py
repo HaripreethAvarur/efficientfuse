@@ -9,7 +9,9 @@ import argparse
 import csv
 from pathlib import Path
 
-GROUPINGS = ("full", "first_pair", "last_pair", "separate")
+from greenfuse.naming import GROUPING_NAMES
+
+GROUPINGS = tuple(GROUPING_NAMES.values())
 # Same slots as export_experiment.py so colors match across figures.
 COLORS = {"full": "#2a78d6", "first_pair": "#1baf7a", "last_pair": "#eb6834", "separate": "#6250d6"}
 INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e5e4e0"

@@ -5,6 +5,7 @@ from itertools import product
 
 from greenfuse.graph.ir import NormalizedGraph
 from greenfuse.graph.validate import validate_graph
+from greenfuse.naming import GROUPING_IDS
 
 
 class SearchSpaceTooLarge(ValueError):
@@ -75,17 +76,13 @@ def enumerate_partitions(graph: NormalizedGraph, *, max_partitions: int = 256) -
     )
 
 
-# Readable names for the four W1 groupings (cut bit 1 = split between operations).
-PARTITION_ALIASES = {"full": "p00", "first_pair": "p01", "last_pair": "p10", "separate": "p11"}
-
-
 def select_partitions(partitions, names=None):
     """Keep only the requested partitions, given as IDs (p01) or aliases (first_pair)."""
     if not names:
         return tuple(partitions)
-    wanted = [PARTITION_ALIASES.get(name, name) for name in names]
+    wanted = [GROUPING_IDS.get(name, name) for name in names]
     by_id = {p.id: p for p in partitions}
     unknown = [name for name, pid in zip(names, wanted) if pid not in by_id]
     if unknown:
-        raise ValueError(f"Unknown partitions {unknown}; choose from {sorted(by_id)} or {sorted(PARTITION_ALIASES)}")
+        raise ValueError(f"Unknown partitions {unknown}; choose from {sorted(by_id)} or {sorted(GROUPING_IDS)}")
     return tuple(by_id[pid] for pid in dict.fromkeys(wanted))

@@ -4,7 +4,7 @@ GreenFuse is a CSE 585 research project that tests whether different ways of gro
 
 The GitHub repository is **efficientfuse**. The Python package and command are named **greenfuse**.
 
-**Current status:** the initial implementation covers all four project roles for workload W1. Real CPU compilation, correctness, timing, and executor reuse have been checked. Selection and cache logic have been tested using clearly labeled synthetic data. **NVIDIA GPU execution, real energy measurements, and the full GPU calibration/cache demonstration still need hardware validation.** The local test run on October 29, 2026 completed 117 tests: 110 passed and seven GPU tests were skipped.
+**Current status:** the planner, compilation, CUDA Graph replay, timing, NVML energy measurement, validation, and decision cache have been exercised on an NVIDIA A40 for workloads W1–W6. Results are under [results/](results/); partial grouping is workload-dependent and is not assumed to win.
 
 ## What the project runs
 
@@ -294,6 +294,30 @@ greenfuse calibrate \
 
 Each shape receives its own measurements, validation, and decision identity. This takes longer than the single-shape experiment.
 
+## Additional workloads and policies
+
+| Workload | Calculation |
+| --- | --- |
+| `w1` | `relu(x + bias) + residual` |
+| `w2` | `gelu(x @ weight + bias)` |
+| `w3` | `gelu(layer_norm(x + residual))` |
+| `w4` | `h = x + bias; h - h.mean(-1, keepdim=True)` |
+| `w5` | `softmax(gelu(x + bias), -1)` |
+| `w6` | `gelu(layer_norm(x + residual) @ weight + bias)` |
+
+Experiment configs are in [configs/](configs/). Run one with `greenfuse calibrate --config configs/<name>.yaml --exclusive-gpu`. Useful settings:
+
+- `partitions`: run selected partition IDs, for example `[p10, p00]`.
+- `replay_input_refresh`: `always` copies inputs on every replay; `on_change` copies only new or modified inputs.
+- `gemm_backend`: `default`, `autotune`, `triton`, or `fuse_epilogue`.
+
+On Great Lakes with `python/3.12.1`, set the Python header path before compiling:
+
+```bash
+export C_INCLUDE_PATH=/sw/pkgs/arc/python/3.12.1/include/python3.12
+export CPLUS_INCLUDE_PATH=$C_INCLUDE_PATH
+```
+
 ## Component commands
 
 These commands help debug individual parts. They are not additional prerequisites for a successful full calibration.
@@ -304,6 +328,10 @@ These commands help debug individual parts. They are not additional prerequisite
 | `python scripts/check_execution.py --device cuda:0` | Compile and verify the eight execution variants |
 | `python scripts/measure_workload.py --device cuda:0 --exclusive-gpu` | Person 3's standalone time/energy measurement |
 | `greenfuse benchmark --config configs/smoke.yaml --exclusive-gpu` | Save measurements and a provisional selection without validation/caching |
+| `python scripts/screen_candidates.py --cases w2:64x4096 --gemm-backend fuse_epilogue --tol 1e-3 --output results/screen.json` | Quick runtime screen; manual GPU tool, not a calibration |
+| `python scripts/profile_kernels.py --workload w2 --m 64 --n 4096 --partition full --gemm-backend fuse_epilogue --output results/profile.json` | Per-kernel GPU time for one plan; manual GPU tool |
+| `python scripts/quick_energy.py --workload w1 --m 4096 --n 4096 --output results/quick_energy.json` | One-window runtime and energy per plan; manual GPU tool, not a calibration |
+| `python scripts/threshold_sensitivity.py --root results/bhargav` | Recompute exported selections at 1.05×, 1.10× and 1.20× |
 | `greenfuse select REPORT.json` | Select from saved evidence without allocating a GPU |
 | `greenfuse report REPORT.json` | Produce a CSV summary from saved evidence |
 
@@ -349,7 +377,7 @@ CPU results cannot validate CUDA Graph replay, GPU energy, or a GPU-selected cac
 | Person 3 | How much runtime and GPU energy does it use? | [measurement/](src/greenfuse/measurement/), [results.py](src/greenfuse/results.py) |
 | Person 4 | Which measured choice should we validate and reuse? | [planner/](src/greenfuse/planner/), [config.py](src/greenfuse/config.py), [cli.py](src/greenfuse/cli.py) |
 
-The planner components are reusable, but the command-line workload registry currently supports W1 only. Supported graphs are pure, straight chains of addition/ReLU with external tensor inputs. LayerNorm/W2, branching graphs, dynamic shapes, FP16, backward passes, and arbitrary-program optimization are not implemented.
+The command-line registry supports W1–W6. Supported graphs are forward-only chains in which each operation consumes the previous result and may reuse earlier results. Supported operations are add, subtract, ReLU, matmul, GELU, LayerNorm, mean, and softmax. Independent branches, dynamic shapes, FP16, backward passes, and arbitrary-program optimization are not implemented.
 
 ## Returning to an existing checkout
 

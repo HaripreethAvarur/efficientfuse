@@ -1,16 +1,22 @@
 #!/bin/bash
-# Unattended GreenFuse queue (Bhargav, Oct 30 2026). Runs on an allocated GPU node, survives the editor
-# session ending (launch with setsid nohup). Steps run strictly one at a time so energy is not disturbed.
-#   1. wait for the running calibration batch (exp7-exp11) to finish
+# Unattended GreenFuse queue used for exp7-exp14 (Oct 30 2026). Run it on an allocated GPU node from any
+# directory; launch with setsid nohup to survive the editor session ending. Steps run one at a time so
+# energy is not disturbed. Optional settings:
+#   GREENFUSE_VENV            virtual environment (default: <repo>/.venv)
+#   GREENFUSE_PYTHON_INCLUDE  folder containing Python.h, when the compiler cannot find it
+#                             (Great Lakes python/3.12.1: /sw/pkgs/arc/python/3.12.1/include/python3.12)
+#   1. wait for any calibration already running on this account to finish
 #   2. redo any of exp8-exp11 without a final decision (interrupted or invalid), and exp7 (CPU contention)
 #   3. runtime screens: fuse_epilogue (W2 decode shapes, W6) and W6 default
 #   4. calibrations exp12 (W2 fuse_epilogue, 3 decode shapes), exp13 (W6 64x4096), exp14 (W6 512x4096)
 #   5. export readable folders, threshold sensitivity (1.05/1.10/1.20), summary table, tests, local commit
 set -u
-cd /home/bsrinid/ondemand/efficientfuse
-source .venv/bin/activate
-export C_INCLUDE_PATH=/sw/pkgs/arc/python/3.12.1/include/python3.12
-export CPLUS_INCLUDE_PATH=$C_INCLUDE_PATH
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+source "${GREENFUSE_VENV:-.venv}/bin/activate"
+if [ -n "${GREENFUSE_PYTHON_INCLUDE:-}" ]; then
+  export C_INCLUDE_PATH="$GREENFUSE_PYTHON_INCLUDE"
+  export CPLUS_INCLUDE_PATH="$GREENFUSE_PYTHON_INCLUDE"
+fi
 mkdir -p results/bhargav/logs
 LOG=results/bhargav/logs/overnight.log
 say() { echo "$(date '+%F %T') $*" | tee -a "$LOG"; }
@@ -57,8 +63,8 @@ needs_run() {  # true unless every shape has a final validated/inconclusive deci
 }
 
 say "Overnight queue started on $(hostname)"
-while pgrep -u "$USER" -f "greenfuse calibrate" >/dev/null || pgrep -u "$USER" -f run_batch2.sh >/dev/null; do sleep 30; done
-say "Earlier batch finished"
+while pgrep -u "$USER" -f "greenfuse calibrate" >/dev/null; do sleep 30; done
+say "No other calibration running"
 
 for exp in exp8_w3_layernorm_small exp9_w4_fan_out_launch_bound exp10_w5_softmax_small exp11_w2_gemm_bound; do
   if needs_run $exp; then calibrate $exp; else say "SKIP $exp statuses=[$(final_statuses $exp)]"; fi

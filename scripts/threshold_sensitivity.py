@@ -11,19 +11,19 @@ policy, applying the same rule: fastest -> cutoff -> lowest median energy -> run
 They are labelled as a secondary policy declared after the data (Oct 30 2026).
 """
 
-
-def apply_rule(candidates, tolerance):
-    fastest = min(candidates, key=lambda c: (candidates[c]["seconds"], c))
-    limit = candidates[fastest]["seconds"] * (1 + tolerance)
-    feasible = [c for c, v in candidates.items() if v["seconds"] <= limit]
-    return fastest, min(feasible, key=lambda c: (candidates[c]["joules"], candidates[c]["seconds"], c))
-
 import argparse
 import csv
 from pathlib import Path
 
 from greenfuse.planner.select import select_report
 from greenfuse.results import load_report
+
+
+def apply_rule(candidates, tolerance):
+    fastest = min(candidates, key=lambda c: (candidates[c]["seconds"], c))
+    limit = candidates[fastest]["seconds"] * (1 + tolerance)
+    feasible = [c for c, v in candidates.items() if v["seconds"] <= limit]
+    return fastest, min(feasible, key=lambda c: (candidates[c]["joules"], candidates[c]["seconds"], c))
 
 
 def main():

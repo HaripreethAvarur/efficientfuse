@@ -10,31 +10,11 @@ import json
 from pathlib import Path
 import shutil
 
-from greenfuse.naming import grouping_name
+from greenfuse.naming import GROUPING_NAMES, grouping_name
 from greenfuse.partition.enumerate import PartitionSpec
 from greenfuse.results import load_report, summarize_candidate
 
-GROUPINGS = {
-    "p11": ("separate", "[bias add] [ReLU] [residual add]"),
-    "p01": ("first_pair", "[bias add + ReLU] [residual add]"),
-    "p10": ("last_pair", "[bias add] [ReLU + residual add]"),
-    "p00": ("full", "[bias add + ReLU + residual add]"),
-}
-# Operation names per workload; grouping names (separate/first_pair/last_pair/full) are shared.
-OPERATIONS = {
-    "w1": ("bias add", "ReLU", "residual add"),
-    "w2": ("matmul", "bias add", "GELU"),
-    "w3": ("residual add", "LayerNorm", "GELU"),
-    "w4": ("bias add", "row mean", "subtract"),
-    "w5": ("bias add", "GELU", "softmax"),
-}
 _KINDS = None  # operation kinds of the exported workload; set by export() for chains longer than 3
-
-
-def grouping_description(partition, workload="w1"):
-    a, b, c = OPERATIONS[workload]
-    return {"p11": f"[{a}] [{b}] [{c}]", "p01": f"[{a} + {b}] [{c}]",
-            "p10": f"[{a}] [{b} + {c}]", "p00": f"[{a} + {b} + {c}]"}[partition]
 MODES = {"launch": "ordinary", "graph": "replay"}
 # Default validated categorical slots 1 and 2; marker shape is the second cue for mode.
 COLORS = {"full": "#2a78d6", "last_pair": "#eb6834", "first_pair": "#1baf7a", "separate": "#6250d6", "eager": "#52514e",
@@ -45,8 +25,8 @@ def readable(candidate_id):
     if candidate_id == "eager_launch":
         return "eager_baseline"
     partition, mode = candidate_id.rsplit("_", 1)
-    if partition in GROUPINGS:
-        return f"compiled_{GROUPINGS[partition][0]}_{MODES[mode]}"
+    if partition in GROUPING_NAMES:
+        return f"compiled_{GROUPING_NAMES[partition]}_{MODES[mode]}"
     cuts = tuple(int(bit) for bit in partition[1:])
     return f"compiled_{grouping_name(PartitionSpec('', cuts, ()), _KINDS)}_{MODES[mode]}"
 
@@ -55,8 +35,8 @@ def grouping_of(candidate_id):
     if candidate_id == "eager_launch":
         return "eager"
     partition = candidate_id.rsplit("_", 1)[0]
-    if partition in GROUPINGS:
-        return GROUPINGS[partition][0]
+    if partition in GROUPING_NAMES:
+        return GROUPING_NAMES[partition]
     return "full" if set(partition[1:]) == {"0"} else "separate" if set(partition[1:]) == {"1"} else "mixed"
 
 
@@ -96,8 +76,8 @@ def plot(run_dir, decision, shape, path, label="W1"):
     import matplotlib.pyplot as plt
 
     report = load_report(run_dir / "initial.json")
-    plot._mixed = False
     stats = summaries(report)
+    mixed_labeled = False
     figure, axis = plt.subplots(figsize=(9, 5.5), layout="constrained")
     for cid, summary in stats.items():
         time, energy = summary["timing"], summary["energy"]
@@ -106,15 +86,16 @@ def plot(run_dir, decision, shape, path, label="W1"):
         x, y = time["median"] * 1e6, energy["median"] * 1e3
         group, replay = grouping_of(cid), cid.endswith("_graph")
         color = COLORS[group]
+        selected = cid == decision.get("selected_id")
+        label = readable(cid) if group != "mixed" or selected else None
+        if group == "mixed" and not selected and not mixed_labeled:
+            label, mixed_labeled = "mixed groupings", True
         axis.errorbar(x, y, xerr=[[x - time["minimum"] * 1e6], [time["maximum"] * 1e6 - x]],
                       yerr=[[y - energy["minimum"] * 1e3], [energy["maximum"] * 1e3 - y]],
                       fmt="s" if group == "eager" else ("D" if replay else "o"), markersize=8,
                       color=color, mfc="white" if replay else color, mew=2, elinewidth=1, capsize=3,
-                      label=(readable(cid) if group != "mixed" or cid == decision.get("selected_id")
-                             else ("mixed groupings" if not getattr(plot, "_mixed", None) else None)))
-        if group == "mixed":
-            plot._mixed = True
-        if cid == decision.get("selected_id"):
+                      label=label)
+        if selected:
             axis.scatter([x], [y], s=380, facecolors="none", edgecolors="#0b0b0b", linewidths=1.5, zorder=5)
             axis.annotate("selected", (x, y), xytext=(10, 10), textcoords="offset points", color="#0b0b0b", fontsize=9)
     selection = decision.get("selection") or {}
@@ -138,8 +119,9 @@ def export(run_dir, dest, shape, label="W1"):
     global _KINDS
     run_dir, dest = Path(run_dir), Path(dest)
     decision = json.loads((run_dir / "decision.json").read_text())
-    workload = json.loads((run_dir / "initial.json").read_text())["metadata"]["workload"]
-    if workload["name"] not in OPERATIONS:  # longer chains: name groups by their operations
+    metadata = json.loads((run_dir / "initial.json").read_text())["metadata"]
+    workload = metadata["workload"]
+    if len(metadata["partitions"][0]["cuts"]) != 2:  # longer chains: name groups by their operations
         from greenfuse.graph.capture import capture_graph
         from greenfuse.workloads.registry import get_workload
         n = workload["inputs"][0]["shape"][-1]
