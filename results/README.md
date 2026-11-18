@@ -1,6 +1,6 @@
-# GreenFuse results: last_pair and full groupings
+# GreenFuse results
 
-Scope: this half of the team's search space. The other half (separate, first_pair) is run separately.
+Experiments 1–2 cover the last_pair and full groupings; the all-groupings run repeats them with all four groupings; Experiment 3 uses a second workload where partial fusion can win. How to rerun everything: see the [top-level README](../README.md#reproduce).
 
 Workload W1: `torch.relu(x + bias) + residual`, FP32, contiguous, inference only, seed 0. `x` and `residual` are `[M, N]`; `bias` is `[N]`.
 
@@ -36,8 +36,16 @@ results/
 │   ├── energy_by_shape.png
 │   ├── 1024x1024/  4096x4096/  8192x8192/   summary.csv, runtime_vs_energy.png, raw/
 │   └── logs/                          attempt 1 (interrupted during 4096) and attempt 2
-└── decisions/                         planner cache (hash file names are required by the code)
+├── all_groupings_w1_all_shapes/       all 4 groupings x 2 modes, 4 shapes (same layout as exp2)
+└── exp3_fanout_screen/
+    ├── summary.csv                    every shape, k and candidate
+    ├── raw/                           per-(shape, k) trial data
+    ├── kernel_analysis/               generated Triton code + per-kernel stats
+    ├── kernel_trace/                  KERNEL_TRACE_<shape>.md explanations, Chrome traces
+    └── progress.log, slurm-*.log, environment.json
 ```
+
+The planner decision cache (`results/decisions/`) is written by `greenfuse calibrate` but not committed.
 
 Each shape folder contains:
 
@@ -100,6 +108,46 @@ What the large shapes show:
 - **The kernels are memory-bound.** compiled_full_ordinary at 4096² reaches about 566 GB/s, roughly 81% of the A40's peak bandwidth.
 - **Run-to-run variation is under 1%.**
 
+## All groupings, all shapes (validated)
+
+Config: `configs/all_groupings_w1_all_shapes.yaml`
+
+- **What ran:** all 8 compiled candidates plus eager, measured under identical conditions in one run on the A40.
+- **Folder:** `all_groupings_w1_all_shapes/`, with one subfolder per shape plus `summary_all_shapes.csv`, `energy_by_shape.png`, and `logs/`.
+- **Names:** `first_pair` = `p01`, `separate` = `p11`.
+
+| Shape | Selected (validated, cached) |
+|---|---|
+| 32×256 | `compiled_full_replay` |
+| 1024×1024 | `compiled_full_replay` |
+| 4096×4096 | `compiled_full_ordinary` |
+| 8192×8192 | `compiled_full_ordinary` |
+
+Fresh validation pass, µs / mJ per call:
+
+| Candidate | 32×256 | 1024×1024 | 4096×4096 | 8192×8192 |
+|---|---|---|---|---|
+| compiled_full_ordinary | 120.6 / 9.14 | 123.3 / 12.36 | **354.6 / 78.50** | **1393 / 317.4** |
+| compiled_full_replay | **95.9 / 7.31** | **96.9 / 14.23** | 839.2 / 187.2 | 3309 / 743.0 |
+| compiled_first_pair_ordinary | 205.7 / 15.11 | 207.0 / 20.55 | 590.6 / 127.1 | 2332 / 504.1 |
+| compiled_first_pair_replay | 96.8 / 7.36 | 98.2 / 16.08 | 1077.6 / 236.4 | 4252 / 942.4 |
+| compiled_last_pair_ordinary | 204.7 / 15.51 | 207.9 / 20.48 | 590.7 / 129.2 | 2332 / 512.8 |
+| compiled_last_pair_replay | 96.8 / 7.46 | 98.1 / 16.15 | 1077.6 / 238.0 | 4250 / 950.7 |
+| compiled_separate_ordinary | 285.8 / 21.59 | 286.5 / 27.68 | 827.8 / 177.6 | 3275 / 721.7 |
+| compiled_separate_replay | 98.6 / 7.61 | 99.4 / 17.09 | 1311.3 / 282.4 | 5190 / 1148 |
+| eager_baseline | 84.9 / 6.44 | 86.1 / 12.14 | 847.6 / 191.1 | 3354 / 764.3 |
+
+What the results show:
+
+- **Large shapes (4096², 8192²) track memory traffic exactly.** Each call moves separate : pair : full = 7 : 5 : 3 tensors (reads plus writes), and ordinary-mode runtime follows suit. At 4096² the measured ratio is 2.33 : 1.67 : 1, against a prediction of 2.33 : 1.67 : 1.
+  - Energy follows the same ordering.
+  - first_pair and last_pair are indistinguishable because they move the same amount of data.
+- **Small shapes (32×256, 1024²) are dominated by per-call overhead.**
+  - Replay makes every grouping roughly the same cost.
+  - In ordinary mode, cost grows with the number of compiled groups.
+  - Eager is still the fastest option at these sizes.
+- **Full fusion wins at every shape.** No partial grouping beat it. This was expected for a pure elementwise chain: fusion only removes traffic here. A case where partial fusion could win needs a workload where full fusion has a cost, which is Experiment 3.
+
 ## Known issue: replay numbers include input copies
 
 Replay mode copies every input into its own buffers on every call; see `src/greenfuse/execution/graphs.py`, `run()`. That adds 4 tensor reads and writes per call that ordinary mode does not do, and the numbers match it:
@@ -109,42 +157,33 @@ Replay mode copies every input into its own buffers on every call; see `src/gree
 
 **Do not read "replay is slower at large shapes" as a finding.** Ordinary-vs-ordinary and ordinary-vs-eager comparisons are unaffected. The team needs to decide whether to measure replay without the copy and report the refresh cost separately, which is what the project spec asks for.
 
-## Reproduce
+## Rerunning
 
-Run on a GPU node:
-
-```bash
-cd efficientfuse
-module load gcc/13.2.0                     # system gcc 8.5 breaks TorchInductor
-export CC=$(which gcc) CXX=$(which g++)
-conda activate env_scalable
-
-python scripts/check_environment.py --device cuda:0 --exclusive-gpu --output results/setup/environment.json
-python scripts/check_execution.py --device cuda:0 --partitions p10 p00 --compiler-artifacts \
-  --output results/setup/execution_checks_last_pair_and_full.json
-GREENFUSE_RUN_GPU_TESTS=1 GREENFUSE_EXCLUSIVE_GPU=1 python -m unittest discover -s tests
-
-greenfuse calibrate --config configs/exp1_w1_small_last_pair_full.yaml --exclusive-gpu \
-  --output-dir results/runs/exp1 --cache-dir results/decisions
-greenfuse calibrate --config configs/exp2_w1_large_last_pair_full.yaml --exclusive-gpu \
-  --output-dir results/runs/exp2 --cache-dir results/decisions
-
-# Turn a planner run folder into a readable experiment folder
-python scripts/export_experiment.py results/runs/exp2/<run>/w1_4096x4096/<id> \
-  results/exp2_w1_large_shapes/4096x4096 --shape 4096x4096
-
-# Use a cached decision (only for shapes whose calibration reported "validated")
-greenfuse run --config configs/exp2_w1_large_last_pair_full.yaml --exclusive-gpu \
-  --cache-dir results/decisions --output-dir results/runs/exp2_cached
-```
-
-## Code changes made for these runs (uncommitted)
-
-1. `partitions:` config key and `--partitions` script flag to run a subset of groupings.
-2. `src/greenfuse/compiler/inspect.py`: PyTorch 2.15 writes the invocation marker on both the CPU and GPU timelines; the parser now counts only the CPU marker.
-3. `src/greenfuse/measurement/environment.py`: the torch version now comes from `torch.__version__`. This matches the compiler record, so selection no longer rejects valid data.
-4. `scripts/export_experiment.py`: produces the readable summaries and plots in this folder.
+Steps are in the [top-level README](../README.md#reproduce). On Great Lakes, load `gcc/13.2.0` first (system gcc 8.5 breaks TorchInductor).
 
 Version note: the team guide pins torch 2.10.0+cu128 and this run used 2.15.0+cu132. Use the same version before pooling numbers with the other pair. Planner cache keys include the torch version, so cached decisions from the two versions will not match.
 
-Next: Experiment 3, a workload where full fusion has a real cost (for example linear + GELU), is on hold.
+## Experiment 3: shared expensive intermediate (fan-out), partial fusion wins
+
+Script: `scripts/exp3_screen_fanout.py` (Slurm: `scripts/slurm/exp3_fanout_screen.sbatch`). Folder: `exp3_fanout_screen/`.
+
+Workload: `y = E_k(x)` (k alternating sin/tanh ops), then `out = y * y.sum(-1, keepdim=True)`. Rows are too long for a persistent reduction, so the fully fused kernel walks each row twice and recomputes `y` in the second pass. Splitting after `y` stores it once (one extra write + read) instead.
+
+Candidates: `compiled_full`, `compiled_split_after_y` = [E_k] [sum + multiply], `compiled_separate`, and eager. Ordinary execution only; 5 rounds of 2 s windows, shuffled order.
+
+split_after_y relative to full (time / energy; below 1 means the split wins):
+
+| k | 8192×8192 | 2048×32768 |
+|---|---|---|
+| 2 | 1.93 / 1.55 | 1.83 / 1.53 |
+| 4 | 1.97 / 1.72 | 1.44 / 1.30 |
+| 8 | 1.19 / 1.19 | 1.15 / 1.15 |
+| 12 | **0.88 / 0.88** | **0.86 / 0.85** |
+| 16 | **0.79 / 0.83** | **0.77 / 0.77** |
+| 24 | **0.68 / 0.70** | **0.66 / 0.70** |
+| 32 | 1.22 / 1.23 | 1.16 / 1.15 |
+
+- **For 12 ≤ k ≤ 24 the partial grouping beats full fusion by 12–34% in time and 12–30% in energy** at both shapes.
+- Why (from the generated code in `kernel_trace/`): full fusion evaluates the sin/tanh chain twice per element (2k ops); the split evaluates it once.
+- At k = 32 Inductor changes strategy and the fused kernel stores `y` instead of recomputing it, so full wins again.
+- This is a standalone screen, not yet run through the planner's separate timing/energy passes and validation.
