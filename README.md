@@ -2,7 +2,7 @@
 
 GreenFuse tests whether different ways of grouping GPU operations for compilation (TorchInductor), with or without CUDA Graph replay, reduce GPU energy while staying within 5% of the fastest runtime. The Python package and command are named `greenfuse`.
 
-- **Results:** [results/README.md](results/README.md) (W1 + sin/tanh fan-out screen) and [results/bhargav/README.md](results/bhargav/README.md) (W1–W6, exp3–exp14).
+- **Results:** [results/haripreeth/README.md](results/haripreeth/README.md) (W1 + sin/tanh fan-out screen) and [results/bhargav/README.md](results/bhargav/README.md) (W1–W6, exp3–exp14).
 - **History:** what was done in each version, and why, is in [PROJECT_VERSION_LOG.md](PROJECT_VERSION_LOG.md).
 
 | Workload | Calculation |
@@ -37,7 +37,7 @@ efficientfuse/
 │   ├── exp3_inspect_kernels.py, exp3_trace_report.py   fan-out screen kernel analysis
 │   └── slurm/                                     Slurm jobs
 ├── tests/                  unit, integration, and GPU tests
-├── results/                all measured results
+├── results/                all measured results: haripreeth/ and bhargav/, one folder per person
 ├── docs/SETUP.md           detailed setup and command reference
 └── PROJECT_VERSION_LOG.md  history: what changed in each version, findings, mistakes, reasons
 ```
@@ -61,7 +61,7 @@ Bhargav's W1–W6 runs used PyTorch 2.10.0+cu128 with a venv instead; see [resul
 **2. Check the setup** (optional)
 
 ```bash
-python scripts/check_environment.py --device cuda:0 --exclusive-gpu --output results/setup/environment.json
+python scripts/check_environment.py --device cuda:0 --exclusive-gpu --output results/haripreeth/setup/environment.json
 GREENFUSE_RUN_GPU_TESTS=1 GREENFUSE_EXCLUSIVE_GPU=1 python -m unittest discover -s tests
 ```
 
@@ -73,7 +73,7 @@ greenfuse calibrate --config configs/all_groupings_w1_all_shapes.yaml --exclusiv
 
 # Repeat for each shape; <run>/<id> are printed by calibrate
 python scripts/export_experiment.py results/runs/all_groupings/<run>/w1_4096x4096/<id> \
-  results/all_groupings_w1_all_shapes/4096x4096 --shape 4096x4096
+  results/haripreeth/all_groupings_w1_all_shapes/4096x4096 --shape 4096x4096
 ```
 
 Experiments 1 and 2 alone: use `configs/exp1_w1_small_last_pair_full.yaml` or `configs/exp2_w1_large_last_pair_full.yaml` in the same command.
@@ -88,4 +88,4 @@ python scripts/exp3_inspect_kernels.py             # generated Triton code + per
 python scripts/exp3_trace_report.py --shape 8192x8192
 ```
 
-Outputs go to `results/exp3_fanout_screen/`.
+Outputs go to `results/haripreeth/exp3_fanout_screen/`.

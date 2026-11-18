@@ -2,7 +2,7 @@
 
 This log records every version of the project: what was there, what changed, what we found, what went wrong, why we made each decision, and what we expected. **Add a new entry at the end each time you change code or run an experiment.** A template is at the bottom.
 
-Results and plots are in [results/README.md](results/README.md). The steps to rerun everything are in [README.md](README.md#reproduce).
+Results and plots are in [results/README.md](results/README.md), an index of `results/haripreeth/` and `results/bhargav/`. Paths in v1–v6 below are the paths at that time; since v7, Hari's folders live under `results/haripreeth/`. The steps to rerun everything are in [README.md](README.md#reproduce).
 
 ## Version index
 
@@ -14,7 +14,8 @@ Results and plots are in [results/README.md](results/README.md). The steps to re
 | [v3](#v3--experiment-3-fan-out-workload-where-partial-fusion-wins-hari) | 2026-10-30 | Haripreeth Avarur | `e8fe82b` | Experiment 3: a second workload where splitting the computation beats full fusion by up to 34% in time and 30% in energy. |
 | [v4](#v4--repository-cleanup-and-publishing-hari) | 2026-11-18 | Haripreeth Avarur | `e8fe82b`, `06885e7`, `7144860` | Repo cleaned and published to GitHub, plus a short README with rerun steps and this log. |
 | [v5](#v5--workloads-w2w6-and-exp3exp14-bhargav) | 2026-10-29 → 11-18 | Bhargav Keralapur Srinidhi | `340602f` … `bb96c30`, `ac5a7d8` (PR #1), `479875a` | Workloads W2–W6, fan-out support in the graph code, GEMM and replay-input policies, and 12 experiments (exp3–exp14). Partial grouping wins only when full fusion forces a slower Triton GEMM. |
-| [v6](#v6--merging-bhargavs-work-into-haris-branch-hari) | 2026-11-18 | Haripreeth Avarur | this merge | Brought Shreya's latest `main` (with Bhargav's v5) into Hari's fork, kept Hari's file structure and docs, and prepared a pull request back to Shreya's repo. |
+| [v6](#v6--merging-bhargavs-work-into-haris-branch-hari) | 2026-11-18 | Haripreeth Avarur | `68383d1` | Brought Shreya's latest `main` (with Bhargav's v5) into Hari's fork, kept Hari's file structure and docs, and prepared a pull request back to Shreya's repo. |
+| [v7](#v7--one-results-folder-per-person-hari) | 2026-11-18 | Haripreeth Avarur | this commit | Moved Hari's results into `results/haripreeth/` to match `results/bhargav/`; `results/README.md` is now an index. |
 
 ## Terms used throughout
 
@@ -516,7 +517,7 @@ Together they suggest that **fan-out makes full fusion lose only when the row no
 
 ## v6 — Merging Bhargav's work into Hari's branch (Hari)
 
-**Date:** 2026-11-18. **Author:** Haripreeth Avarur. **Commit:** this merge commit and its follow-up.
+**Date:** 2026-11-18. **Author:** Haripreeth Avarur. **Commit:** `68383d1`.
 
 ### Why
 
@@ -538,7 +539,30 @@ Hari's fork was 4 commits ahead of Shreya's `main` and 10 behind it. Those 10 we
 
 ---
 
-## Open issues (as of v6)
+## v7 — One results folder per person (Hari)
+
+**Date:** 2026-11-18. **Author:** Haripreeth Avarur. **Commit:** this commit.
+
+### Why
+
+After the v6 merge, Bhargav's results were in `results/bhargav/` with their own README, but Hari's were spread across `results/` next to it. One folder per person makes it clear who ran what, under which PyTorch version, and keeps the two sets from being pooled by accident.
+
+### What changed
+
+- **Folders moved** (contents unchanged, git history preserved), all into `results/haripreeth/`: `setup/`, `exp1_w1_small_shape/`, `exp2_w1_large_shapes/`, `all_groupings_w1_all_shapes/`, and `exp3_fanout_screen/`.
+- **`results/README.md`** became `results/haripreeth/README.md`; its links and folder tree were updated for the new location.
+- **New `results/README.md`:** a short index of both folders with each person's PyTorch version, and a warning not to pool absolute numbers across them.
+- **Paths updated:**
+  - default output paths in `scripts/exp3_screen_fanout.py`, `exp3_inspect_kernels.py`, `exp3_trace_report.py`, and `scripts/slurm/exp3_fanout_screen.sbatch`;
+  - the comment in `scripts/compare_workloads.py`;
+  - the rerun commands in `README.md`;
+  - three cross-references in `results/bhargav/README.md`, which pointed at Hari's old paths;
+  - `.gitignore` now publishes `results/haripreeth/` and `results/bhargav/`.
+- **Left unchanged:** absolute paths inside raw JSON and log files. Those are historical records of where the files were when they were made.
+
+---
+
+## Open issues (as of v7)
 
 | # | Issue | Since | Notes |
 |---|---|---|---|

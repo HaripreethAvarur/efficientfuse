@@ -25,11 +25,7 @@ torchinductor_*/
 results/*
 !results/README.md
 # Published experiment results (planner cache in results/decisions stays local)
-!results/setup/
-!results/exp1_w1_small_shape/
-!results/exp2_w1_large_shapes/
-!results/all_groupings_w1_all_shapes/
-!results/exp3_fanout_screen/
+!results/haripreeth/
 !results/bhargav/
 outputs/
 tmp/

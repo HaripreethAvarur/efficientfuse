@@ -57,7 +57,7 @@ def main():
     parser.add_argument("--shapes", nargs="+", default=["8192x8192", "2048x32768"])
     parser.add_argument("--k", nargs="+", type=int, default=[4, 8, 12, 16, 24, 32])
     parser.add_argument("--iterations", type=int, default=20)
-    parser.add_argument("--output-dir", type=Path, default=Path("results/exp3_fanout_screen/kernel_analysis"))
+    parser.add_argument("--output-dir", type=Path, default=Path("results/haripreeth/exp3_fanout_screen/kernel_analysis"))
     args = parser.parse_args()
 
     import torch

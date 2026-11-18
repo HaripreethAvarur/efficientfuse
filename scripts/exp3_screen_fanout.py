@@ -195,7 +195,7 @@ def main():
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--rel-tol", type=float, default=1e-4, help="Max |compiled - eager| / max|eager|")
-    parser.add_argument("--output-dir", type=Path, default=Path("results/exp3_fanout_screen"))
+    parser.add_argument("--output-dir", type=Path, default=Path("results/haripreeth/exp3_fanout_screen"))
     args = parser.parse_args()
 
     import torch
